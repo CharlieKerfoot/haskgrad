@@ -5,13 +5,12 @@ import Control.Monad (forM_, when)
 import NN (forwardMLP, mkRNG, newMLP, sgdStep, zeroGrads)
 import Numeric (showFFloat)
 
--- | XOR training data
 xorData :: [([Double], Double)]
 xorData =
-  [ ([0, 0], 0)
-  , ([0, 1], 1)
-  , ([1, 0], 1)
-  , ([1, 1], 0)
+  [ ([0, 0], 0),
+    ([0, 1], 1),
+    ([1, 0], 1),
+    ([1, 1], 0)
   ]
 
 main :: IO ()
@@ -24,49 +23,53 @@ main = do
   putStrLn $ replicate 60 '-'
 
   let epochs = 1000 :: Int
-      lr     = 0.05
+      lr = 0.05
 
   forM_ [1 .. epochs] $ \epoch -> do
-    -- Zero gradients
     zeroGrads mlp
 
-    -- Forward pass on all samples, accumulate squared-error loss
-    losses <- mapM (\(xs, target) -> do
-      inputs <- mapM val xs
-      [p]    <- forwardMLP mlp inputs
-      tv     <- val target
-      diff   <- sub p tv
-      power diff 2
-      ) xorData
+    losses <-
+      mapM
+        ( \(xs, target) -> do
+            inputs <- mapM val xs
+            [p] <- forwardMLP mlp inputs
+            tv <- val target
+            diff <- sub p tv
+            power diff 2
+        )
+        xorData
 
     loss <- foldl1M add losses
 
-    -- Backward + update
     backward loss
     sgdStep lr mlp
 
-    -- Print progress
     when (epoch `mod` 100 == 0 || epoch == 1) $ do
       lossVal <- getData loss
-      preds <- mapM (\(xs, _) -> do
-        inputs <- mapM val xs
-        [p]    <- forwardMLP mlp inputs
-        getData p
-        ) xorData
+      preds <-
+        mapM
+          ( \(xs, _) -> do
+              inputs <- mapM val xs
+              [p] <- forwardMLP mlp inputs
+              getData p
+          )
+          xorData
       let fmtD = showFFloat (Just 4)
           predStr = unwords $ map (\p -> padR 8 (fmtD p "")) preds
       putStrLn $ padR 8 (show epoch) ++ padR 14 (fmtD lossVal "") ++ predStr
 
-  -- Final predictions
   putStrLn "\nFinal predictions (expect: ~0, ~1, ~1, ~0):"
   forM_ xorData $ \(xs, target) -> do
     inputs <- mapM val xs
-    [p]    <- forwardMLP mlp inputs
-    pVal   <- getData p
-    putStrLn $ "  Input: " ++ show (map round xs :: [Int])
-      ++ "  Target: " ++ show (round target :: Int)
-      ++ "  Pred: " ++ showFFloat (Just 4) pVal ""
+    [p] <- forwardMLP mlp inputs
+    pVal <- getData p
+    putStrLn $
+      "  Input: "
+        ++ show (map round xs :: [Int])
+        ++ "  Target: "
+        ++ show (round target :: Int)
+        ++ "  Pred: "
+        ++ showFFloat (Just 4) pVal ""
 
--- | Right-pad a string to width n
 padR :: Int -> String -> String
 padR n s = s ++ replicate (max 0 (n - length s)) ' '

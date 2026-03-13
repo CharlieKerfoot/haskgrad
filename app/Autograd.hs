@@ -28,7 +28,6 @@ import Data.IORef
 import qualified Data.Set as S
 import System.IO.Unsafe (unsafePerformIO)
 
--- | Global UID counter for unique identification of Values
 {-# NOINLINE uidCounter #-}
 uidCounter :: IORef Int
 uidCounter = unsafePerformIO $ newIORef 0
@@ -36,7 +35,6 @@ uidCounter = unsafePerformIO $ newIORef 0
 freshUID :: IO Int
 freshUID = atomicModifyIORef' uidCounter (\n -> (n + 1, n))
 
--- | Core autograd value with mutable data, grad, and backward closure
 data Value = Value
   { _data     :: !(IORef Double)
   , _grad     :: !(IORef Double)
@@ -54,11 +52,9 @@ instance Ord Value where
 instance Show Value where
   show v = "Value(uid=" ++ show (_uid v) ++ ")"
 
--- | Smart constructor for leaf values
 val :: Double -> IO Value
 val x = Value <$> newIORef x <*> newIORef 0.0 <*> pure (return ()) <*> pure [] <*> freshUID
 
--- | Point-free accessors
 getData :: Value -> IO Double
 getData = readIORef . _data
 
@@ -77,8 +73,6 @@ zeroGrad = flip writeIORef 0.0 . _grad
 addGrad :: Value -> Double -> IO ()
 addGrad v = modifyIORef' (_grad v) . (+)
 
--- | Binary operation combinator
--- gradFn takes (aData, bData, outGrad) and returns (gradA, gradB)
 binOp :: (Double -> Double -> Double)
       -> (Double -> Double -> Double -> (Double, Double))
       -> Value -> Value -> IO Value
@@ -95,7 +89,6 @@ binOp f gradFn a b = do
         addGrad b gb
   return $ Value d g bwd [a, b] u
 
--- | Unary operation combinator
 unaryOp :: (Double -> Double)
         -> (Double -> Double -> Double)
         -> Value -> IO Value
@@ -109,7 +102,6 @@ unaryOp f gradFn a = do
         addGrad a (gradFn da og)
   return $ Value d g bwd [a] u
 
--- | Arithmetic operations via combinators
 add :: Value -> Value -> IO Value
 add = binOp (+) (\_ _ og -> (og, og))
 
@@ -122,7 +114,6 @@ sub = binOp (-) (\_ _ og -> (og, negate og))
 divide :: Value -> Value -> IO Value
 divide = binOp (/) (\_ db og -> (og / db, negate og / (db * db)))
 
--- | Unary operations
 neg :: Value -> IO Value
 neg = unaryOp negate (const negate)
 
@@ -132,11 +123,9 @@ expV = unaryOp exp (\da og -> og * exp da)
 logV :: Value -> IO Value
 logV = unaryOp log (flip (/))
 
--- | Power (scalar exponent, not tracked)
 power :: Value -> Double -> IO Value
 power a e = unaryOp (** e) (\da og -> og * e * (da ** (e - 1))) a
 
--- | Activation functions
 relu :: Value -> IO Value
 relu = unaryOp (max 0) (\da og -> if da > 0 then og else 0)
 
@@ -147,9 +136,6 @@ sigmoid = unaryOp sig (\da og -> let s = sig da in og * s * (1 - s))
 tanhV :: Value -> IO Value
 tanhV = unaryOp tanh (\da og -> og * (1 - tanh da ^ (2 :: Int)))
 
--- | Softmax over a list of Values
--- Forward: si = exp(xi - max) / sum(exp)
--- Backward per output i: dL/dxj += dL/dsi * si * (delta_ij - sj)
 softmax :: [Value] -> IO [Value]
 softmax xs = do
   ds <- mapM getData xs
@@ -157,10 +143,8 @@ softmax xs = do
       exps_   = map (\d -> exp (d - maxD)) ds
       sumExps = sum exps_
       sVals   = map (/ sumExps) exps_
-  -- Create output nodes
   outNodes <- mapM (\sv ->
     Value <$> newIORef sv <*> newIORef 0.0 <*> pure (return ()) <*> pure [] <*> freshUID) sVals
-  -- Wire backward: each output i knows its index and all softmax values
   let wired = zipWith3 (\i si outV ->
         outV { _backward = do
                  og <- readIORef (_grad outV)
@@ -172,7 +156,6 @@ softmax xs = do
         ) [(0::Int)..] sVals outNodes
   return wired
 
--- | Topological sort using Data.Set for visited tracking
 topoSort :: Value -> [Value]
 topoSort root = snd $ go S.empty [] root
   where
@@ -184,13 +167,11 @@ topoSort root = snd $ go S.empty [] root
                                          (_children v)
           in (visited', v : order')
 
--- | Reverse-mode autodiff via topological sort
 backward :: Value -> IO ()
 backward root = do
   writeIORef (_grad root) 1.0
   mapM_ _backward (topoSort root)
 
--- | Monadic fold over a non-empty list
 foldl1M :: (Monad m) => (a -> a -> m a) -> [a] -> m a
 foldl1M _ []     = error "foldl1M: empty list"
 foldl1M _ [x]    = return x
